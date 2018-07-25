@@ -26,22 +26,7 @@ import (
 	ads "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v2"
 )
 
-func (c *ClientV2) GetEndpoints(streamClient ads.AggregatedDiscoveryService_StreamAggregatedResourcesClient, clusterNames []string) []*envoy_api_v2.ClusterLoadAssignment {
-	err := c.ReqEndpoints(streamClient, clusterNames)
-	if err != nil {
-		log.DefaultLogger.Fatalf("get endpoints fail: %v", err)
-		return nil
-	}
-	r, err := streamClient.Recv()
-	if err != nil {
-		log.DefaultLogger.Fatalf("get endpoints fail: %v", err)
-		return nil
-
-	}
-	return c.HandleEndpointesResp(r)
-}
-
-func (c *ClientV2) ReqEndpoints(streamClient ads.AggregatedDiscoveryService_StreamAggregatedResourcesClient, clusterNames []string) error {
+func (c *ClientV2) reqEndpoints(streamClient ads.AggregatedDiscoveryService_StreamAggregatedResourcesClient, clusterNames []string) error {
 	if streamClient == nil {
 		return errors.New("stream client is nil")
 	}
@@ -63,7 +48,7 @@ func (c *ClientV2) ReqEndpoints(streamClient ads.AggregatedDiscoveryService_Stre
 	return nil
 }
 
-func (c *ClientV2) HandleEndpointesResp(resp *envoy_api_v2.DiscoveryResponse) []*envoy_api_v2.ClusterLoadAssignment {
+func (c *ClientV2) handleEndpointesResp(resp *envoy_api_v2.DiscoveryResponse) []*envoy_api_v2.ClusterLoadAssignment {
 	lbAssignments := make([]*envoy_api_v2.ClusterLoadAssignment, 0)
 	for _, res := range resp.Resources {
 		lbAssignment := envoy_api_v2.ClusterLoadAssignment{}

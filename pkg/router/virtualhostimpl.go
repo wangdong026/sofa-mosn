@@ -18,6 +18,7 @@
 package router
 
 import (
+	"errors"
 	"regexp"
 
 	"github.com/alipay/sofa-mosn/internal/api/v2"
@@ -26,7 +27,7 @@ import (
 	"github.com/markphelps/optional"
 )
 
-func NewVirtualHostImpl(virtualHost *v2.VirtualHost, validateClusters bool) *VirtualHostImpl {
+func NewVirtualHostImpl(virtualHost *v2.VirtualHost, validateClusters bool) (*VirtualHostImpl, error) {
 	var virtualHostImpl = &VirtualHostImpl{virtualHostName: virtualHost.Name}
 
 	switch virtualHost.RequireTLS {
@@ -55,16 +56,18 @@ func NewVirtualHostImpl(virtualHost *v2.VirtualHost, validateClusters bool) *Vir
 
 		} else if route.Match.Regex != "" {
 
-			if regPattern, err := regexp.Compile(route.Match.Prefix); err == nil {
+			if regPattern, err := regexp.Compile(route.Match.Regex); err == nil {
 				virtualHostImpl.routes = append(virtualHostImpl.routes, &RegexRouteRuleImpl{
 					NewRouteRuleImplBase(virtualHostImpl, &route),
-					route.Match.Prefix,
+					route.Match.Regex,
 					*regPattern,
 				})
 			} else {
 				log.DefaultLogger.Errorf("Compile Regex Error")
 			}
 		} else {
+			// todo delete hack
+			// hack here to do sofa's routing policy
 			for _, header := range route.Match.Headers {
 				if header.Name == types.SofaRouteMatchKey {
 					virtualHostImpl.routes = append(virtualHostImpl.routes, &SofaRouteRuleImpl{
@@ -74,6 +77,9 @@ func NewVirtualHostImpl(virtualHost *v2.VirtualHost, validateClusters bool) *Vir
 				}
 			}
 		}
+	}
+	if len(virtualHostImpl.routes) == 0 {
+		return nil, errors.New("routes must specify one of prefix/path/regex/header")
 	}
 
 	// todo check cluster's validity
@@ -95,7 +101,7 @@ func NewVirtualHostImpl(virtualHost *v2.VirtualHost, validateClusters bool) *Vir
 		}
 	}
 
-	return virtualHostImpl
+	return virtualHostImpl, nil
 }
 
 type VirtualHostImpl struct {
@@ -104,9 +110,9 @@ type VirtualHostImpl struct {
 	virtualClusters       []VirtualClusterEntry
 	sslRequirements       types.SslRequirements
 	corsPolicy            types.CorsPolicy
-	globalRouteConfig     *ConfigImpl
-	requestHeadersParser  *HeaderParser
-	responseHeadersParser *HeaderParser
+	globalRouteConfig     *configImpl
+	requestHeadersParser  *headerParser
+	responseHeadersParser *headerParser
 }
 
 func (vh *VirtualHostImpl) Name() string {
@@ -127,7 +133,6 @@ func (vh *VirtualHostImpl) RateLimitPolicy() types.RateLimitPolicy {
 func (vh *VirtualHostImpl) GetRouteFromEntries(headers map[string]string, randomValue uint64) types.Route {
 	// todo check tls
 	for _, route := range vh.routes {
-
 		if routeEntry := route.Match(headers, randomValue); routeEntry != nil {
 			return routeEntry
 		}

@@ -19,6 +19,7 @@ package tests
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"regexp"
@@ -37,7 +38,6 @@ import (
 	"github.com/alipay/sofa-mosn/pkg/protocol/sofarpc/codec"
 	"github.com/alipay/sofa-mosn/pkg/stream"
 	"github.com/alipay/sofa-mosn/pkg/types"
-	"github.com/orcaman/concurrent-map"
 	"golang.org/x/net/http2"
 )
 
@@ -138,7 +138,7 @@ type HTTP2Response struct {
 	re *regexp.Regexp
 }
 
-func (resp *HTTP2Response) Filter(data string, records cmap.ConcurrentMap) {
+func (resp *HTTP2Response) Filter(data string, records sync.Map) {
 	if resp.re == nil {
 		resp.re = regexp.MustCompile("\nRequestId:[0-9]+\n")
 	}
@@ -147,8 +147,8 @@ func (resp *HTTP2Response) Filter(data string, records cmap.ConcurrentMap) {
 	)
 	if len(bodys) == 2 {
 		requestID := bodys[1]
-		if _, ok := records.Get(requestID); ok {
-			records.Remove(requestID)
+		if _, ok := records.Load(requestID); ok {
+			records.Delete(requestID)
 		}
 	}
 }
@@ -171,7 +171,7 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type ReponseFilter interface {
-	Filter(data string, records cmap.ConcurrentMap)
+	Filter(data string, records sync.Map)
 }
 
 //Rpc client
@@ -181,7 +181,7 @@ type RPCClient struct {
 	conn           types.ClientConnection
 	addr           string
 	responseFilter ReponseFilter
-	waitReponse    cmap.ConcurrentMap
+	waitReponse    sync.Map
 }
 
 //types.ReadFilter
@@ -223,7 +223,7 @@ func GetStreamID() uint32 {
 
 func (c *RPCClient) SendRequest(streamID uint32, req []byte) {
 	c.conn.Write(buffer.NewIoBufferBytes(req))
-	c.waitReponse.Set(fmt.Sprintf("%d", streamID), streamID)
+	c.waitReponse.Store(fmt.Sprintf("%d", streamID), streamID)
 }
 
 //BoltV1 Client
@@ -232,7 +232,7 @@ type BoltV1Client struct {
 	t            *testing.T
 	ClientID     string
 	Codec        stream.CodecClient
-	Waits        cmap.ConcurrentMap
+	Waits        sync.Map
 	conn         types.ClientConnection
 	respCount    uint32
 	requestCount uint32
@@ -257,7 +257,7 @@ func (c *BoltV1Client) SendRequest() {
 	headers := buildBoltV1Request(id)
 	requestEncoder.AppendHeaders(headers, true)
 	atomic.AddUint32(&c.requestCount, 1)
-	c.Waits.Set(streamID, streamID)
+	c.Waits.Store(streamID, streamID)
 }
 func (c *BoltV1Client) Stats() {
 	c.t.Logf("client %s send request:%d, get response:%d \n", c.ClientID, c.requestCount, c.respCount)
@@ -273,10 +273,10 @@ func (c *BoltV1Client) OnDecodeError(err error, headers map[string]string) {
 func (c *BoltV1Client) OnReceiveHeaders(headers map[string]string, endStream bool) {
 	streamID, ok := headers[sofarpc.SofaPropertyHeader(sofarpc.HeaderReqID)]
 	if ok {
-		if _, ok := c.Waits.Get(streamID); ok {
+		if _, ok := c.Waits.Load(streamID); ok {
 			//c.t.Logf("Get Stream Response: %s ,headers: %v\n", streamID, headers)
 			atomic.AddUint32(&c.respCount, 1)
-			c.Waits.Remove(streamID)
+			c.Waits.Delete(streamID)
 		}
 	}
 }
@@ -337,7 +337,7 @@ func ServeBoltV1(t *testing.T, conn net.Conn) {
 		if bytesRead > 0 {
 			iobuf.Write(buf[:bytesRead])
 			for iobuf.Len() > 1 {
-				_, cmd := codec.BoltV1.GetDecoder().Decode(nil, iobuf)
+				cmd, _ := codec.BoltV1.GetDecoder().Decode(nil, iobuf)
 				if cmd == nil {
 					break
 				}
@@ -355,5 +355,46 @@ func ServeBoltV1(t *testing.T, conn net.Conn) {
 			}
 		}
 	}
+}
 
+//tools
+func RandomDuration(min, max time.Duration) time.Duration {
+	if min > max {
+		return min
+	}
+	d := rand.Int63n(int64(max - min))
+	return time.Duration(d) * time.Nanosecond
+}
+func IsMapEmpty(m sync.Map) bool {
+	empty := true
+	//If there is a key in the map, return not empty
+	m.Range(func(key, value interface{}) bool {
+		empty = false
+		return false
+	})
+	return empty
+}
+func WaitMapEmpty(m sync.Map, timeout time.Duration) bool {
+	ch := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-ch:
+				return
+			default:
+				if IsMapEmpty(m) {
+					close(ch)
+					return
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+		}
+	}() //check goroutine
+	select {
+	case <-time.After(timeout):
+		close(ch)            // finish check goroutine
+		return IsMapEmpty(m) // timeout, retry again
+	case <-ch:
+		return true //map empty
+	}
 }

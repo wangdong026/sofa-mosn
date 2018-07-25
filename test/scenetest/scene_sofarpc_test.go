@@ -18,18 +18,18 @@
 package tests
 
 import (
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/alipay/sofa-mosn/cmd/mosn"
 	"github.com/alipay/sofa-mosn/pkg/protocol"
 	"github.com/alipay/sofa-mosn/pkg/types"
-	"github.com/orcaman/concurrent-map"
 )
 
 func TestSofaRpc(t *testing.T) {
 	sofaAddr := "127.0.0.1:8080"
-	meshAddr := "127.0.0.1:2045"
+	meshAddr := CurrentMeshAddr()
 	server := NewUpstreamServer(t, sofaAddr, ServeBoltV1)
 	server.GoServe()
 	defer server.Close()
@@ -42,15 +42,14 @@ func TestSofaRpc(t *testing.T) {
 	client := &BoltV1Client{
 		t:        t,
 		ClientID: "testClient",
-		Waits:    cmap.New(),
+		Waits:    sync.Map{},
 	}
 	client.Connect(meshAddr)
 	defer client.conn.Close(types.NoFlush, types.LocalClose)
 	for i := 0; i < 20; i++ {
 		client.SendRequest()
 	}
-	<-time.After(10 * time.Second)
-	if !client.Waits.IsEmpty() {
+	if !WaitMapEmpty(client.Waits, 20*time.Second) {
 		t.Errorf("exists request no response\n")
 	}
 }

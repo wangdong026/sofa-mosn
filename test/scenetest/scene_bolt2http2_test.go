@@ -20,18 +20,18 @@ package tests
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/alipay/sofa-mosn/cmd/mosn"
 	"github.com/alipay/sofa-mosn/pkg/protocol"
 	"github.com/alipay/sofa-mosn/pkg/types"
-	"github.com/orcaman/concurrent-map"
 )
 
 func TestBolt2Http2(t *testing.T) {
 	http2Addr := "127.0.0.1:8080"
-	meshAddr := "127.0.0.1:2045"
+	meshAddr := CurrentMeshAddr()
 	server := NewUpstreamHTTP2(t, http2Addr)
 	server.GoServe()
 	defer server.Close()
@@ -46,7 +46,7 @@ func TestBolt2Http2(t *testing.T) {
 		t:              t,
 		addr:           meshAddr,
 		responseFilter: &HTTP2Response{},
-		waitReponse:    cmap.New(),
+		waitReponse:    sync.Map{},
 	}
 	if err := client.Connect(); err != nil {
 		t.Fatalf("client connect failed\n")
@@ -60,9 +60,7 @@ func TestBolt2Http2(t *testing.T) {
 		client.SendRequest(ID, boltV1ReqBytes)
 	}
 	//client.wait_response should empty
-	<-time.After(10 * time.Second)
-	if !client.waitReponse.IsEmpty() {
+	if !WaitMapEmpty(client.waitReponse, 15*time.Second) {
 		t.Errorf("exists request no response\n")
-		t.Logf("%v\n", client.waitReponse.Keys())
 	}
 }

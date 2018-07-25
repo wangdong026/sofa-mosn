@@ -26,21 +26,7 @@ import (
 	ads "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v2"
 )
 
-func (c *ClientV2) GetListeners(streamClient ads.AggregatedDiscoveryService_StreamAggregatedResourcesClient) []*envoy_api_v2.Listener {
-	err := c.ReqListeners(streamClient)
-	if err != nil {
-		log.DefaultLogger.Fatalf("get listener fail: %v", err)
-		return nil
-	}
-	r, err := streamClient.Recv()
-	if err != nil {
-		log.DefaultLogger.Fatalf("get listener fail: %v", err)
-		return nil
-	}
-	return c.HandleListersResp(r)
-}
-
-func (c *ClientV2) ReqListeners(streamClient ads.AggregatedDiscoveryService_StreamAggregatedResourcesClient) error {
+func (c *ClientV2) reqListeners(streamClient ads.AggregatedDiscoveryService_StreamAggregatedResourcesClient) error {
 	if streamClient == nil {
 		return errors.New("stream client is nil")
 	}
@@ -61,7 +47,7 @@ func (c *ClientV2) ReqListeners(streamClient ads.AggregatedDiscoveryService_Stre
 	return nil
 }
 
-func (c *ClientV2) HandleListersResp(resp *envoy_api_v2.DiscoveryResponse) []*envoy_api_v2.Listener {
+func (c *ClientV2) handleListersResp(resp *envoy_api_v2.DiscoveryResponse) []*envoy_api_v2.Listener {
 	listeners := make([]*envoy_api_v2.Listener, 0)
 	for _, res := range resp.Resources {
 		listener := envoy_api_v2.Listener{}
